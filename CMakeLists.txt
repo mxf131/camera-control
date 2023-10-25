@@ -31,3 +31,8 @@ target_link_libraries(frame-test
         spdlog::spdlog
 )
 
+add_executable(prop-test src/prop-test.cpp)
+target_link_libraries(prop-test
+        ${OpenCV_LIBS}
+        spdlog::spdlog
+)
