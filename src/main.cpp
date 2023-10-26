@@ -3,6 +3,7 @@
 #include <chrono>
 #include <ctime>
 #include <random> // 随机数库
+#include <cmath>
 #include <thread>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
@@ -71,7 +72,7 @@ int main()
     cap.set(cv::CAP_PROP_WB_TEMPERATURE,4600);//白平衡色温
     cap.set(cv::CAP_PROP_AUTO_WB,0);//启用/禁用自动白平衡 0 关闭 1 打开
     
-    cap.set(cv::CAP_PROP_FOCUS,500);
+    cap.set(cv::CAP_PROP_FOCUS,205);
 
     cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
 
@@ -86,12 +87,13 @@ int main()
 
     // 存储对比度历史记录
     std::deque<double> contrast_history = {};
+    std::deque<double> contrasts = {};
     // 摄像头状态
     // 测焦状态
     // 调焦状态
     // 平稳运行状态
     int camera_state = 0;
-    double contrast_threshold = 0.1;  // 对比度调整的阈值
+    double contrast_threshold = 0.05;  // 对比度调整的阈值
     double focus_plus_contrast = 0; // 增大焦距后的对比度
     double focus_minus_contrast = 0; // 减小焦距后的对比度
     double current_contrast = 0; //当前对比度
@@ -101,10 +103,13 @@ int main()
     int focus_step = 0; //调焦间距
     double max_contrast; // 最大对比度
     int right_focus = 0; //正确的焦距
+    int old_focus = 0;
     int count = 0; // 求最合适焦点的计数值
+    int frame_count = 0; //几帧图片后拍摄
     while(1)
     {
     	cap >> frame;
+	frame_count++;
 	// 更改镜头或者说当焦距需要变化的时候
 	// 先调整百分之十的焦距 减小百分之十 增大百分之十 确定调焦方向
 	// 然后依次调整百分之十获取到最大对比度
@@ -115,115 +120,149 @@ int main()
 	current_focus = cap.get(cv::CAP_PROP_FOCUS);
         spdlog::info("focus : {}",current_focus);
 
-	// 计算相机与之前保存的对比度平均值的差值
 	// 计算当前对比度
         current_contrast = calculateContrast(frame);
-        spdlog::info("current contrast : {}", current_contrast);
 	// 计算历史平均对比度
 	target_contrast = calculateMovingAverage(contrast_history, 10);
-	spdlog::info("Target Contrast: {}", target_contrast);
-	if (std::abs(current_contrast-target_contrast)<contrast_threshold)
-	{
-	    // 把当前对比度放入对比度历史队列
-            contrast_history.push_back(current_contrast);
+	if (camera_state == 0)
+	{	
+		// 计算相机与之前保存的对比度平均值的差值
+		// 小于阈值继续工作
+		if (std::abs(current_contrast-target_contrast)<contrast_threshold)
+		{
+	    		// 把当前对比度放入对比度历史队列
+            		contrast_history.push_back(current_contrast);
+			if(frame_count%10==0)
+			{
+				// 拍摄图片样例
+    				// 获取当前时间
+    				auto now = std::chrono::system_clock::now();
+    				std::time_t time_now = std::chrono::system_clock::to_time_t(now);
+    				auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    				// 格式化时间字符串
+    				char time_str[100];
+    				std::strftime(time_str, sizeof(time_str), "%Y-%m-%d_%H-%M-%S", std::localtime(&time_now));
+    				std::string path = "/home/pi/saveimg/";
+    				std::string filename = path + std::string(time_str) + "_" + std::to_string(ms.count()) + ".jpg";
+    				// 保存图像
+    				bool success = cv::imwrite(filename, frame);
+				spdlog::info("save image {}", filename);
+			}
+		}
+		else
+		{
+	        	camera_state = 9; // 调整焦距
+	    	}
 	}
-	else
+	// 需要调焦的准备工作
+	else if(camera_state==9)
 	{
-	    if (camera_state == 0)
-	    {
-	        camera_state = -1; // 调整焦距
-	    }
-	    else if (camera_state < 0)
-	    {
-	    	camera_state--;
-	    }
-	    else if (camera_state == 2)
-	    {
-	    	camera_state = 2;
-	    }
-	    else if (camera_state == 3)
-	    {
-	    	camera_state = 3;
-	    }
-	}
-	// 小于阈值继续运行
-	if (camera_state==0)
-	{
-		spdlog::info("camera state = 0 ");
+		// 清空无效数据
+		contrast_history.clear();
+		frame_count=0;
+		// 获取之前的焦距
+                old_focus = cap.get(cv::CAP_PROP_FOCUS);
+		// 计算所处的位置log2
+		int level = static_cast<int>(log2(old_focus));
+		if(level<6)
+		{
+			focus_step=1;
+		}
+		else
+		{
+			focus_step=1;
+		}
+		// 开始调焦
+		camera_state = -1;  // 调整焦距变大
+		contrasts.clear();  // 清空应该保存5个对比度的值
+		new_focus = old_focus + focus_step;  // 新的焦距
+                cap.set(cv::CAP_PROP_FOCUS, new_focus);  // 设置焦距
 	}
 	// 大于阈值调整焦距
 	else if (camera_state==-1)
 	{
-		// 清空无效数据
-		contrast_history.clear();
-		// 获取当前焦距
-                current_focus = cap.get(cv::CAP_PROP_FOCUS);
-		if (current_focus>101 && current_focus < 923)
+		if (frame_count < 5)
 		{
+			// 保存对比度
+			contrasts.push_back(current_contrast);
 			// 调整焦距
-                	new_focus = current_focus + 100;
+                	current_focus = cap.get(cv::CAP_PROP_FOCUS);
+                	new_focus = current_focus + focus_step;
                 	cap.set(cv::CAP_PROP_FOCUS, new_focus);
 		}
 		else
 		{
-			new_focus = current_focus + 10;
-                	cap.set(cv::CAP_PROP_FOCUS, new_focus);
+			// 计算一下平均值
+			focus_plus_contrast = calculateMovingAverage(contrasts, 5);
+			// 恢复默认值
+			frame_count = 0;
+			contrasts.clear();
+                	cap.set(cv::CAP_PROP_FOCUS, old_focus-focus_step);
+			camera_state = -2;
 		}
 	}
 	else if (camera_state==-2)
 	{
-		focus_plus_contrast = current_contrast;
-		// 获取当前焦距
-                current_focus = cap.get(cv::CAP_PROP_FOCUS);
-		if (current_focus>=201)
-		{
-			// 调整焦距
-                	new_focus = current_focus-200;
-                	cap.set(cv::CAP_PROP_FOCUS, new_focus);
-		}
-		else
-		{
-			// 调整焦距
-                	new_focus = current_focus-20;
-                	cap.set(cv::CAP_PROP_FOCUS, new_focus);
-		}
-	}
-	else if (camera_state==-3)
-	{
-		focus_minus_contrast = current_contrast;
-		// 获取当前焦距
-                current_focus = cap.get(cv::CAP_PROP_FOCUS);
-		if(focus_plus_contrast>focus_minus_contrast)
-		{
-			camera_state = 1; // 焦距增大调焦
-			focus_step = (int)(1023-(current_focus+100))/10;
-		}
-		else
-		{
-			camera_state = 2; // 焦距减小调焦
-			focus_step = (int)(current_focus+100-1)/10;
-		}
-		// 设置为原来的焦距 在按照比例调整
-		cap.set(cv::CAP_PROP_FOCUS, current_focus+100);
+                if (frame_count < 5)
+                {
+                        // 保存对比度
+                        contrasts.push_back(current_contrast);
+                        // 调整焦距
+                        current_focus = cap.get(cv::CAP_PROP_FOCUS);
+                        new_focus = current_focus - focus_step;
+                        cap.set(cv::CAP_PROP_FOCUS, new_focus);
+                }
+                else
+                {
+                        // 计算一下平均值
+                        focus_minus_contrast = calculateMovingAverage(contrasts, 5);
+                        // 恢复默认值
+                        frame_count = 0;
+			contrasts.clear();
+			if (focus_minus_contrast < focus_plus_contrast)
+			{
+				// plus
+				camera_state=1;
+                        	cap.set(cv::CAP_PROP_FOCUS, old_focus+focus_step);
+			}
+			else
+			{
+				// minus
+				camera_state=2;
+                        	cap.set(cv::CAP_PROP_FOCUS, old_focus-focus_step);
+			}
+                }
 	}
 	else if(camera_state==1)
 	{
-		spdlog::info("camera state = 1 ==========");
-		if(count<10)
-		{
+	    	if(count<5)
+	    	{
+			spdlog::info("camera state = 1 ==========");
 			current_focus = cap.get(cv::CAP_PROP_FOCUS);
 			if(max_contrast<current_contrast)
 			{
 				max_contrast=current_contrast;
 				right_focus=current_focus;
 			}
+			else
+			{
+				count++;
+			}
 			new_focus = current_focus + focus_step;
-			cap.set(cv::CAP_PROP_FOCUS, new_focus);
-			count++;
-		}
-		else
+			if(new_focus>0 && new_focus<1024)
+			{
+				cap.set(cv::CAP_PROP_FOCUS, new_focus);
+				count++;
+			}
+			else
+			{
+				count=5;
+			}
+	    	}	
+	    	else
 		{
-			spdlog::info("camera state = 1 and end");
+			spdlog::info("camera state 1 end");
 			// 开启pid调焦？最佳焦点在[right_focus - step, right_focus + step]
 			cap.set(cv::CAP_PROP_FOCUS, right_focus);
 			contrast_history.clear();
@@ -238,51 +277,45 @@ int main()
 	}
 	else if(camera_state==2)
 	{
-		spdlog::info("camera state = 2 ==========");
-		if(count<10)
-		{
-			// 获取当前焦距 设置焦距 获取对比度
-			current_focus = cap.get(cv::CAP_PROP_FOCUS);
-			if(max_contrast<current_contrast)
-			{
-				max_contrast=current_contrast;
-				right_focus=current_focus;
-			}
-			new_focus = current_focus - focus_step;
-			cap.set(cv::CAP_PROP_FOCUS, new_focus);
-			count++;
-		}
-		else
-		{
-			spdlog::info("camera state = 1 and end");
-			// 开启pid调焦？最佳焦点在[right_focus - step, right_focus + step]
-			cap.set(cv::CAP_PROP_FOCUS, right_focus);
-			contrast_history.clear();
-			for (int i = 0; i < 10; i++) 
-			{
-				contrast_history.push_back(max_contrast);
-			}
-			camera_state=0;
-			count=0;
-			max_contrast=0;
-		}
+		if(count<5)
+                {
+                        spdlog::info("camera state = 1 ==========");
+                        current_focus = cap.get(cv::CAP_PROP_FOCUS);
+                        if(max_contrast<current_contrast)
+                        {
+                                max_contrast=current_contrast;
+                                right_focus=current_focus;
+                        }
+                        else
+                        {
+                                count++;
+                        }
+                        new_focus = current_focus + focus_step;
+                        if(new_focus>0 && new_focus<1024)
+                        {
+                                cap.set(cv::CAP_PROP_FOCUS, new_focus);
+                                count++;
+                        }
+                        else
+                        {
+                                count=5;
+                        }
+                }
+                else
+                {
+                        spdlog::info("camera state 1 end");
+                        // 开启pid调焦？最佳焦点在[right_focus - step, right_focus + step]
+                        cap.set(cv::CAP_PROP_FOCUS, right_focus);
+                        contrast_history.clear();
+                        for (int i = 0; i < 10; i++)
+                        {
+                                contrast_history.push_back(max_contrast);
+                        }
+                        camera_state=0;
+		        count=0;
+                        max_contrast=0;
+                }
 	}
-/*
-	// 拍摄图片样例
-    	// 获取当前时间
-    	auto now = std::chrono::system_clock::now();
-    	std::time_t time_now = std::chrono::system_clock::to_time_t(now);
-    	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-    	// 格式化时间字符串
-    	char time_str[100];
-    	std::strftime(time_str, sizeof(time_str), "%Y-%m-%d_%H-%M-%S", std::localtime(&time_now));
-    	std::string path = "/home/pi/saveimg/";
-    	std::string filename = path + std::string(time_str) + "_" + std::to_string(ms.count()) + ".jpg";
-    	// 保存图像
-    	bool success = cv::imwrite(filename, frame);
-	spdlog::info("save image {}", filename);
-*/
     }
 
     cap.release();

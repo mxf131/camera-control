@@ -73,15 +73,17 @@ int main()
     cv::Mat frame;
     int c = 0;
     int focus = 1;
-    while(c<11)
+    double current_contrast;
+    while(c<100)
     {
     	cap >> frame;
+	current_contrast = calculateContrast(frame);
+	spdlog::info("============{}",current_contrast);
         // 调整焦距
-	focus+=100;
+	focus+=10;
         cap.set(cv::CAP_PROP_FOCUS, focus);
 	c++;
 
-/*
 	// 拍摄图片样例
     	// 获取当前时间
     	auto now = std::chrono::system_clock::now();
@@ -95,8 +97,7 @@ int main()
     	std::string filename = path + std::string(time_str) + "_" + std::to_string(ms.count()) + ".jpg";
     	// 保存图像
     	bool success = cv::imwrite(filename, frame);
-	spdlog::info("save image {}", filename);
-  */
+	// spdlog::info("save image {}", filename);
     }
 
     cap.release();
