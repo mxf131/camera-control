@@ -72,16 +72,16 @@ int main()
     // 捕获图像帧
     cv::Mat frame;
     int c = 0;
-    int focus = 1;
+    int focus = 0;
     double current_contrast;
-    while(c<100)
+    while(c<4)
     {
     	cap >> frame;
 	current_contrast = calculateContrast(frame);
 	spdlog::info("============{}",current_contrast);
         // 调整焦距
 	focus+=10;
-        cap.set(cv::CAP_PROP_FOCUS, focus);
+        cap.set(cv::CAP_PROP_ZOOM, focus);
 	c++;
 
 	// 拍摄图片样例
