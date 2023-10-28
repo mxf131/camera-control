@@ -57,8 +57,8 @@ int main()
     }
 
     // capture settings
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1920);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 1080);
     cap.set(cv::CAP_PROP_CONVERT_RGB, true); // 设置为 RGB 格式
     
     cap.set(cv::CAP_PROP_BACKLIGHT, 0);//补光 0不补光 1补光强度1 2补光强度2 (以相机为准)
@@ -106,6 +106,10 @@ int main()
     int old_focus = 0;
     int count = 0; // 求最合适焦点的计数值
     int frame_count = 0; //几帧图片后拍摄
+    double dy,k,l;
+    int dx;
+    double last_contrast;
+    int last_focus;
     while(1)
     {
     	cap >> frame;
@@ -116,12 +120,26 @@ int main()
 	// 依据什么触发更改焦距呢----对比度较大更改
 	// 动态计算目标对比度
 	
+	// 定义裁剪的区域（矩形）
+    	int x = 930; // 左上角 x 坐标
+    	int y = 465; // 左上角 y 坐标
+    	int width = 200; // 裁剪的宽度
+    	int height = 150; // 裁剪的高度
+
+    	// 创建一个矩形区域
+    	cv::Rect roi(x, y, width, height);
+
+    	// 使用矩形区域裁取图像
+    	cv::Mat target_img = frame(roi);	
+	
 	// 输出当前焦距
 	current_focus = cap.get(cv::CAP_PROP_FOCUS);
         spdlog::info("focus : {}",current_focus);
 
 	// 计算当前对比度
-        current_contrast = calculateContrast(frame);
+        current_contrast = calculateContrast(target_img);
+	spdlog::info("contrast : {}", current_contrast);
+
 	// 计算历史平均对比度
 	target_contrast = calculateMovingAverage(contrast_history, 10);
 	if (camera_state == 0)
@@ -167,11 +185,11 @@ int main()
 		int level = static_cast<int>(log2(old_focus));
 		if(level<6)
 		{
-			focus_step=1;
+			focus_step=10;
 		}
 		else
 		{
-			focus_step=1;
+			focus_step=10;
 		}
 		// 开始调焦
 		camera_state = -1;  // 调整焦距变大
@@ -195,6 +213,7 @@ int main()
 		{
 			// 计算一下平均值
 			focus_plus_contrast = calculateMovingAverage(contrasts, 5);
+			spdlog::info("focus plus contrast : {}", focus_plus_contrast);
 			// 恢复默认值
 			frame_count = 0;
 			contrasts.clear();
@@ -217,6 +236,7 @@ int main()
                 {
                         // 计算一下平均值
                         focus_minus_contrast = calculateMovingAverage(contrasts, 5);
+			spdlog::info("focus minus contrast : {}", focus_minus_contrast);
                         // 恢复默认值
                         frame_count = 0;
 			contrasts.clear();
@@ -236,29 +256,17 @@ int main()
 	}
 	else if(camera_state==1)
 	{
-	    	if(count<5)
-	    	{
+		dx = current_focus - last_focus;
+		dy = current_contrast - last_contrast;
+		l = dy/dx;
+		spdlog::info("dy/dx : {}", l);
+
+		if(std::abs(l) > 0.01)
+		{
 			spdlog::info("camera state = 1 ==========");
-			current_focus = cap.get(cv::CAP_PROP_FOCUS);
-			if(max_contrast<current_contrast)
-			{
-				max_contrast=current_contrast;
-				right_focus=current_focus;
-			}
-			else
-			{
-				count++;
-			}
+			focus_step = k * l; 	
 			new_focus = current_focus + focus_step;
-			if(new_focus>0 && new_focus<1024)
-			{
-				cap.set(cv::CAP_PROP_FOCUS, new_focus);
-				count++;
-			}
-			else
-			{
-				count=5;
-			}
+			cap.set(cv::CAP_PROP_FOCUS, new_focus);
 	    	}	
 	    	else
 		{
@@ -277,9 +285,9 @@ int main()
 	}
 	else if(camera_state==2)
 	{
-		if(count<5)
+		if(count<10)
                 {
-                        spdlog::info("camera state = 1 ==========");
+                        spdlog::info("camera state = 2 ==========");
                         current_focus = cap.get(cv::CAP_PROP_FOCUS);
                         if(max_contrast<current_contrast)
                         {
@@ -291,19 +299,11 @@ int main()
                                 count++;
                         }
                         new_focus = current_focus + focus_step;
-                        if(new_focus>0 && new_focus<1024)
-                        {
-                                cap.set(cv::CAP_PROP_FOCUS, new_focus);
-                                count++;
-                        }
-                        else
-                        {
-                                count=5;
-                        }
+                        cap.set(cv::CAP_PROP_FOCUS, new_focus);
                 }
                 else
                 {
-                        spdlog::info("camera state 1 end");
+                        spdlog::info("camera state 2 end");
                         // 开启pid调焦？最佳焦点在[right_focus - step, right_focus + step]
                         cap.set(cv::CAP_PROP_FOCUS, right_focus);
                         contrast_history.clear();

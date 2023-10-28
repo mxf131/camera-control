@@ -65,7 +65,7 @@ int main()
     cap.set(cv::CAP_PROP_WB_TEMPERATURE,4600);//白平衡色温
     cap.set(cv::CAP_PROP_AUTO_WB,0);//启用/禁用自动白平衡 0 关闭 1 打开
     
-    cap.set(cv::CAP_PROP_FOCUS,0);
+    cap.set(cv::CAP_PROP_FOCUS,1);
 
     cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
 
@@ -74,14 +74,16 @@ int main()
     int c = 0;
     int focus = 0;
     double current_contrast;
-    while(c<4)
+    int current_focus;
+    while(c<100)
     {
     	cap >> frame;
 	current_contrast = calculateContrast(frame);
-	spdlog::info("============{}",current_contrast);
+	current_focus = cap.get(cv::CAP_PROP_FOCUS);
+	spdlog::info("focus : {} ============ contrast: {}", current_focus, current_contrast);
         // 调整焦距
 	focus+=10;
-        cap.set(cv::CAP_PROP_ZOOM, focus);
+        cap.set(cv::CAP_PROP_FOCUS, focus);
 	c++;
 
 	// 拍摄图片样例
