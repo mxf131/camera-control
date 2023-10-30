@@ -78,10 +78,23 @@ int main()
     while(c<100)
     {
     	cap >> frame;
-	current_contrast = calculateContrast(frame);
+        
+	// 定义裁剪的区域（矩形）
+        int x = 540; // 左上角 x 坐标
+        int y = 285; // 左上角 y 坐标
+        int width = 200; // 裁剪的宽度
+        int height = 150; // 裁剪的高度
+
+        // 创建一个矩形区域
+        cv::Rect roi(x, y, width, height);
+
+        // 使用矩形区域裁取图像
+        cv::Mat target_img = frame(roi);
+
+	current_contrast = calculateContrast(target_img);
 	current_focus = cap.get(cv::CAP_PROP_FOCUS);
 	spdlog::info("focus : {} ============ contrast: {}", current_focus, current_contrast);
-        // 调整焦距
+	// 调整焦距
 	focus+=10;
         cap.set(cv::CAP_PROP_FOCUS, focus);
 	c++;
@@ -95,10 +108,10 @@ int main()
     	// 格式化时间字符串
     	char time_str[100];
     	std::strftime(time_str, sizeof(time_str), "%Y-%m-%d_%H-%M-%S", std::localtime(&time_now));
-    	std::string path = "/home/pi/saveimg/";
-    	std::string filename = path + std::string(time_str) + "_" + std::to_string(ms.count()) + ".jpg";
+    	std::string path = "/home/pi/saveimg/focus-";
+    	std::string filename = path + std::to_string(focus) + ".jpg";
     	// 保存图像
-    	bool success = cv::imwrite(filename, frame);
+    	bool success = cv::imwrite(filename, target_img);
 	// spdlog::info("save image {}", filename);
     }
 
